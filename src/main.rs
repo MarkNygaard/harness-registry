@@ -27,6 +27,7 @@ mod auth;
 mod config;
 mod error;
 mod models;
+mod ratelimit;
 mod routes;
 
 use std::time::Duration;
@@ -46,6 +47,9 @@ use crate::config::Config;
 pub struct AppState {
     pub pool: sqlx::PgPool,
     pub config: std::sync::Arc<Config>,
+    /// Guards the unauthenticated install writes. Shared across handlers, so
+    /// the window is per client rather than per request.
+    pub install_limiter: std::sync::Arc<ratelimit::RateLimiter>,
 }
 
 #[tokio::main]
@@ -76,6 +80,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState {
         pool,
         config: std::sync::Arc::new(config.clone()),
+        install_limiter: std::sync::Arc::new(ratelimit::RateLimiter::new(
+            config.install_rate_limit,
+            Duration::from_secs(config.install_rate_window_secs),
+        )),
     };
 
     let app = Router::new()

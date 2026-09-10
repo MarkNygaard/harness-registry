@@ -120,23 +120,37 @@ bearer secret in practice** — anyone who learns one can drop that harness's
 rows. The alternative is issuing a credential to every install for the
 privilege of being counted. It argues for keeping the id out of logs.
 
-**⚠️ Install counts are not yet trustworthy enough to rank by, and ranking by
-them is what makes that matter.** `PUT .../installs` needs no credential, so
-anyone can invent unlimited `installation_id`s and inflate any workflow's
-count — including their own. That was tolerable while the count was
-decorative; it is not once the count decides who sits at the top of the
-library.
+**Ranking by install count is only defensible because the count is defended.**
+`PUT .../installs` needs no credential, so without guards anyone could invent
+unlimited `installation_id`s and rank their own workflow first — costing
+nothing, needing no publisher token, and strictly cheaper to game than the
+recency ordering it replaced. Two things make the number stand up, and they
+work on different axes:
 
-Which means the anti-spam argument for install-ordering does not hold on its
-own yet. Ordering by recency rewards publishing volume, and volume at least
-costs a publisher token and a real workflow. Ordering by installs rewards
-inventing UUIDs, which costs nothing at all — strictly cheaper to game. The
-ordering is still the right shape; the count has to be defensible first.
+- **A per-client rate limit** on both install endpoints (`INSTALL_RATE_LIMIT`,
+  default 60 per minute) bounds how *fast* a count can be inflated. Fixed
+  window and in-memory, so it is per-replica and resets on restart: this
+  bounds casual abuse, not a distributed adversary. The client is identified
+  from `CF-Connecting-IP`, which Cloudflare overwrites on ingress and an
+  external caller therefore cannot forge, falling back to the first
+  `X-Forwarded-For` entry. Nothing derived from it is stored — it lives in
+  memory for one window and never reaches the database, so
+  `installation_id` stays what the schema intended: an installation, not a
+  person or a machine.
+- **Only installs seen in the last 90 days count**, which bounds how *long* an
+  inflated count survives. A fabricated install has to keep calling to keep
+  counting, and that runs into the rate limit. It also makes the figure mean
+  "installs still out there" rather than "installs ever made", which is the
+  more useful number — the schema anticipated this by refreshing
+  `last_seen_at` on every read of the library.
 
-Before this registry is public, `record` needs at least one of: a per-IP rate
-limit, per-IP deduplication of `installation_id`s, or a count narrowed to rows
-with a recent `last_seen_at` so an abandoned burst decays. Until then the
-library is small enough that the ordering is moot.
+A caller over the limit gets `429`, distinct from every other refusal, so a
+client that is merely early can retry and one that is wrong does not.
+
+**The install endpoints remain unauthenticated, which makes `installation_id` a
+bearer secret in practice** — anyone who learns one can drop that harness's
+rows. The alternative is issuing a credential to every install for the
+privilege of being counted. It argues for keeping the id out of logs.
 
 **A publisher acting on someone else's workflow gets `404`, not `403`.** The
 difference would leak which slugs are taken by whom.
@@ -167,6 +181,8 @@ closed.
 | `CORS_ALLOW_ORIGINS` | *(none)* | comma-separated; empty means no browser access |
 | `ADMIN_TOKEN` | *(none)* | unset disables the admin endpoints |
 | `MAX_YAML_BYTES` | `262144` | largest workflow document accepted |
+| `INSTALL_RATE_LIMIT` | `60` | install writes per client per window |
+| `INSTALL_RATE_WINDOW_SECS` | `60` | length of that window |
 | `RUST_LOG` | `info,harness_registry=debug` | |
 
 ## Development

@@ -30,6 +30,11 @@ pub enum Error {
     #[error("payload too large")]
     TooLarge,
 
+    /// Distinct from every other refusal on purpose: a client that is merely
+    /// early can retry, and one that is wrong should not.
+    #[error("too many requests")]
+    TooManyRequests,
+
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -43,6 +48,7 @@ impl IntoResponse for Error {
             Error::NotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
             Error::Conflict(m) => (StatusCode::CONFLICT, m.clone()),
             Error::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE, self.to_string()),
+            Error::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
             // The message is logged, never returned: a Postgres error can
             // carry table and column names, and a constraint name is a map of
             // the schema.
