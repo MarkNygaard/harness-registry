@@ -117,10 +117,26 @@ in either direction.
 
 **The install endpoints are unauthenticated, which makes `installation_id` a
 bearer secret in practice** — anyone who learns one can drop that harness's
-rows. The stakes are a count rather than anybody's data, and the alternative is
-issuing a credential to every install for the privilege of being counted. It
-does argue for keeping the id out of logs, and for rate limiting both endpoints
-by IP.
+rows. The alternative is issuing a credential to every install for the
+privilege of being counted. It argues for keeping the id out of logs.
+
+**⚠️ Install counts are not yet trustworthy enough to rank by, and ranking by
+them is what makes that matter.** `PUT .../installs` needs no credential, so
+anyone can invent unlimited `installation_id`s and inflate any workflow's
+count — including their own. That was tolerable while the count was
+decorative; it is not once the count decides who sits at the top of the
+library.
+
+Which means the anti-spam argument for install-ordering does not hold on its
+own yet. Ordering by recency rewards publishing volume, and volume at least
+costs a publisher token and a real workflow. Ordering by installs rewards
+inventing UUIDs, which costs nothing at all — strictly cheaper to game. The
+ordering is still the right shape; the count has to be defensible first.
+
+Before this registry is public, `record` needs at least one of: a per-IP rate
+limit, per-IP deduplication of `installation_id`s, or a count narrowed to rows
+with a recent `last_seen_at` so an abandoned burst decays. Until then the
+library is small enough that the ordering is moot.
 
 **A publisher acting on someone else's workflow gets `404`, not `403`.** The
 difference would leak which slugs are taken by whom.

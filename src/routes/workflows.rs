@@ -70,12 +70,32 @@ const LIST_PAGE: &str = " LIMIT $4 OFFSET $5";
 
 /// Listing order. Anything unrecognised falls back to the default rather than
 /// erroring: a bad `sort=` is not worth failing a browse over.
-#[derive(Debug, Default, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+///
+/// Deserialized by hand for that reason. A derived impl rejects an unknown
+/// variant, and `#[serde(default)]` on the field does not help -- it supplies a
+/// default when the key is *absent*, not when its value is unparseable -- so
+/// `?sort=bogus` came back as a 400 from `Query` extraction while this comment
+/// claimed otherwise.
+#[derive(Debug, Default, PartialEq)]
 pub enum Sort {
     #[default]
     Installs,
     Recent,
+}
+
+impl<'de> Deserialize<'de> for Sort {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Ok(match raw.trim().to_ascii_lowercase().as_str() {
+            "recent" => Self::Recent,
+            // Includes "installs" and everything else. Falling back rather
+            // than erroring is the whole point.
+            _ => Self::Installs,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -382,6 +402,26 @@ mod tests {
         let installs: ListParams =
             serde_json::from_str(r#"{"sort":"installs"}"#).expect("explicit sort");
         assert_eq!(installs.sort, Sort::Installs);
+    }
+
+    /// The case the derived impl got wrong. `?sort=bogus` used to come back as
+    /// a 400 from Query extraction, while the docs promised a fallback -- so
+    /// this pins the promise rather than the implementation detail.
+    #[test]
+    fn an_unrecognised_sort_falls_back_instead_of_erroring() {
+        let params: ListParams =
+            serde_json::from_str(r#"{"sort":"bogus"}"#).expect("must not error");
+        assert_eq!(params.sort, Sort::Installs);
+    }
+
+    /// Case and stray whitespace should not be the difference between a
+    /// working sort and a silently ignored one.
+    #[test]
+    fn sort_is_case_and_whitespace_insensitive() {
+        for raw in [r#"{"sort":"RECENT"}"#, r#"{"sort":" recent "}"#] {
+            let p: ListParams = serde_json::from_str(raw).expect(raw);
+            assert_eq!(p.sort, Sort::Recent, "{raw}");
+        }
     }
 
     /// The paging clause is bound separately from the order, so the two cannot
