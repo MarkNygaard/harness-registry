@@ -68,6 +68,8 @@ fetches them at build time.
 | `GET` | `/v1/workflows/{slug}` | — | one workflow |
 | `GET` | `/v1/workflows/{slug}/versions` | — | version history |
 | `GET` | `/v1/workflows/{slug}/versions/{n}` | — | the YAML document |
+| `GET` | `/v1/me` | publisher | who this token is; also how a client checks one is live |
+| `PATCH` | `/v1/me` | publisher | set the display name entries are shown under |
 | `POST` | `/v1/workflows` | publisher | create, with version 1 |
 | `POST` | `/v1/workflows/{slug}/versions` | publisher | publish the next version |
 | `PATCH` | `/v1/workflows/{slug}` | publisher | title, description, tags |

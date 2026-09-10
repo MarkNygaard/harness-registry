@@ -244,6 +244,15 @@ pub struct VersionDocument {
     pub withdrawn: bool,
 }
 
+/// The publisher a token authenticates as, as the harness shows it.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct Me {
+    pub github_login: String,
+    /// What entries are shown under. Null falls back to the login.
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct IssuedToken {
     pub publisher_id: Uuid,

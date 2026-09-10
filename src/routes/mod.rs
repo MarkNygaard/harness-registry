@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod health;
 pub mod installs;
+pub mod me;
 pub mod workflows;
 
 use axum::{
@@ -12,6 +13,8 @@ use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        // Who this token is. The harness asks before offering to publish.
+        .route("/v1/me", get(me::get).patch(me::update))
         .route("/healthz", get(health::live))
         .route("/readyz", get(health::ready))
         // Read side. Public: the registry is a library, and the static site
