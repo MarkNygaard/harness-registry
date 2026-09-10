@@ -1,0 +1,42 @@
+[package]
+name = "harness-registry"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Workflow registry API for ai-harness"
+license = "UNLICENSED"
+publish = false
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+# Runtime-checked queries on purpose: the `query!` macros need a reachable
+# database at compile time (or a checked-in .sqlx cache), and the schema here
+# is owned by a Kubernetes Job in the home-ops repo rather than by migrations
+# in this one. CI must be able to build without a Postgres.
+sqlx = { version = "0.8", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls-ring-webpki",
+  "postgres",
+  "chrono",
+  "uuid",
+  "macros",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+rand = "0.8"
+hex = "0.4"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tower-http = { version = "0.6", features = ["trace", "cors", "limit"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[profile.release]
+lto = "thin"
+strip = true
