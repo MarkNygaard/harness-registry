@@ -64,7 +64,7 @@ fetches them at build time.
 |---|---|---|---|
 | `GET` | `/healthz` | — | process is up |
 | `GET` | `/readyz` | — | database is reachable |
-| `GET` | `/v1/workflows` | — | list; `?tag=`, `?q=`, `?official=`, `?limit=`, `?offset=` |
+| `GET` | `/v1/workflows` | — | list; `?tag=`, `?q=`, `?official=`, `?sort=`, `?limit=`, `?offset=` |
 | `GET` | `/v1/workflows/{slug}` | — | one workflow |
 | `GET` | `/v1/workflows/{slug}/versions` | — | version history |
 | `GET` | `/v1/workflows/{slug}/versions/{n}` | — | the YAML document |
@@ -73,6 +73,7 @@ fetches them at build time.
 | `PATCH` | `/v1/workflows/{slug}` | publisher | title, description, tags |
 | `DELETE` | `/v1/workflows/{slug}` | publisher | unlist (soft) |
 | `PUT` | `/v1/workflows/{slug}/installs` | — | record or refresh an install |
+| `DELETE` | `/v1/workflows/{slug}/installs/{installation_id}` | — | forget an install |
 | `POST` | `/v1/admin/tokens` | admin | issue a publisher token |
 | `PUT` | `/v1/admin/workflows/{slug}/official` | admin | set the badge |
 | `PUT` | `/v1/admin/publishers/{github_id}/blocked` | admin | block or unblock |
@@ -99,6 +100,27 @@ than broken.
 be corrected, cannot be narrowed to installs still alive, and is trivially
 inflated by anyone in a loop. `installation_id` is an opaque UUID the harness
 generates for itself — not a user, not a hostname.
+
+**Listings are ordered by installs, not recency.** Recency hands the top of the
+list to whoever publishes the most, which is the shape of every spam incentive;
+ordering by installs makes a workflow nobody installs invisible however many are
+published. It removes the reward rather than policing the behaviour, and costs
+one clause. `?sort=recent` remains for anyone genuinely looking for what just
+landed. `official` leads either way.
+
+**An install can be forgotten as well as recorded.** Without a `DELETE` the
+count only ever rises — the one-directional drift the record-based design exists
+to avoid, and a harness that removes a workflow would have no way to say so. A
+repeated uninstall is `404` rather than a silent success, since it did not
+delete anything; the harness treats both alike because reporting is best-effort
+in either direction.
+
+**The install endpoints are unauthenticated, which makes `installation_id` a
+bearer secret in practice** — anyone who learns one can drop that harness's
+rows. The stakes are a count rather than anybody's data, and the alternative is
+issuing a credential to every install for the privilege of being counted. It
+does argue for keeping the id out of logs, and for rate limiting both endpoints
+by IP.
 
 **A publisher acting on someone else's workflow gets `404`, not `403`.** The
 difference would leak which slugs are taken by whom.
