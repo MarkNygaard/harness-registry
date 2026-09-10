@@ -152,6 +152,16 @@ bearer secret in practice** — anyone who learns one can drop that harness's
 rows. The alternative is issuing a credential to every install for the
 privilege of being counted. It argues for keeping the id out of logs.
 
+**Bundled workflow names cannot be published.** A harness resolves
+`.harness/workflows/<name>.yaml` before its bundled defaults, so an installed
+workflow of a bundled name does not sit beside the built-in one — it silently
+replaces it, with nothing on screen to say so and nothing deleted to notice.
+Refusing the slug means the bad name never exists to be installed. Only the
+names that *stay* bundled are reserved: `geo-audit`, `bc-idea-to-pr` and
+`review-area` are moving into the library and must remain publishable, and their
+squatting window is closed by publishing them before any third-party token is
+minted rather than by a reservation.
+
 **A publisher acting on someone else's workflow gets `404`, not `403`.** The
 difference would leak which slugs are taken by whom.
 

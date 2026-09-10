@@ -15,6 +15,42 @@ const TAG_MAX: usize = 32;
 const TAGS_MAX: usize = 10;
 const CHANGELOG_MAX: usize = 4_000;
 
+/// Slugs nobody may publish, because the harness ships a workflow of each name.
+///
+/// A harness resolves `.harness/workflows/<name>.yaml` **before** its bundled
+/// defaults, so an installed workflow of the same name does not sit beside the
+/// built-in one — it silently replaces it. Installing a library workflow called
+/// `idea-to-pr` would leave every run of `idea-to-pr` doing whatever the
+/// publisher wrote, with nothing on screen to say so and nothing deleted to
+/// notice. That is the one collision worth refusing outright rather than
+/// renaming around, and refusing it here means the bad name never exists to be
+/// installed.
+///
+/// **Only the names that stay bundled.** `geo-audit`, `bc-idea-to-pr` and
+/// `review-area` are moving out of the harness and into the library, so they
+/// have to remain publishable — by the project, which is the only party that
+/// can publish at all until a publisher token is minted for somebody else.
+/// Publishing them before handing out any third-party token is what closes the
+/// squatting window, not a reservation.
+///
+/// `linear-epic-supervise` is here for a stronger reason than the rest: the
+/// harness dispatches to it by name from its epic router, so shadowing it does
+/// not degrade a workflow, it breaks a code path.
+const RESERVED_SLUGS: &[&str] = &[
+    "idea-to-pr",
+    "revise-pr",
+    "review-pr",
+    "merge-pr",
+    "judge-ab",
+    "architect",
+    "linear-epic-supervise",
+];
+
+/// Whether a slug is one the harness ships and must keep.
+pub fn slug_is_reserved(slug: &str) -> bool {
+    RESERVED_SLUGS.contains(&slug)
+}
+
 /// Validate a slug.
 ///
 /// Lowercase, digits and single dashes only. The schema notes that a slug must
@@ -40,6 +76,15 @@ pub fn validate_slug(slug: &str) -> Result<()> {
         return Err(Error::BadRequest(
             "slug may not start or end with a dash, or contain a double dash".into(),
         ));
+    }
+    // Last, so the shape of a slug is reported before its availability: told
+    // both at once, "Idea-To-PR" would be refused as reserved and the author
+    // would fix the wrong thing.
+    if slug_is_reserved(slug) {
+        return Err(Error::BadRequest(format!(
+            "`{slug}` is the name of a workflow the harness ships, and installing \
+             one of that name would silently replace it"
+        )));
     }
     Ok(())
 }
@@ -214,9 +259,53 @@ mod tests {
 
     #[test]
     fn plain_slugs_are_accepted() {
-        for slug in ["deploy", "idea-to-pr", "geo-audit-2"] {
+        for slug in ["deploy", "geo-audit-ecommerce", "geo-audit-2"] {
             assert!(validate_slug(slug).is_ok(), "{slug}");
         }
+    }
+
+    /// A harness resolves a project workflow *before* its bundled defaults, so
+    /// an installed workflow of a bundled name replaces it rather than sitting
+    /// beside it — invisibly, with nothing deleted to notice. Refusing the name
+    /// here means it never exists to be installed.
+    #[test]
+    fn a_bundled_workflows_name_cannot_be_published() {
+        for slug in [
+            "idea-to-pr",
+            "revise-pr",
+            "review-pr",
+            "merge-pr",
+            "judge-ab",
+            "architect",
+            "linear-epic-supervise",
+        ] {
+            assert!(validate_slug(slug).is_err(), "{slug} should be reserved");
+        }
+    }
+
+    /// The three moving out of the harness must stay publishable, or the move
+    /// cannot happen. Their squatting window is closed by publishing them
+    /// before any third-party token exists, not by reserving them.
+    #[test]
+    fn the_workflows_moving_into_the_library_are_not_reserved() {
+        for slug in ["geo-audit", "bc-idea-to-pr", "review-area"] {
+            assert!(
+                validate_slug(slug).is_ok(),
+                "{slug} is moving to the library and must remain publishable"
+            );
+        }
+    }
+
+    /// Reservation is checked last, so an author is told about the shape of
+    /// their slug before its availability — otherwise `Idea-To-PR` would be
+    /// reported as reserved and they would fix the wrong thing.
+    #[test]
+    fn shape_is_reported_before_availability() {
+        let e = validate_slug("Idea-To-PR").unwrap_err();
+        assert!(
+            format!("{e:?}").contains("lowercase"),
+            "expected the casing complaint, got {e:?}"
+        );
     }
 
     #[test]
