@@ -15,6 +15,12 @@ pub struct Config {
     pub admin_token: Option<String>,
     /// Largest workflow document accepted, in bytes.
     pub max_yaml_bytes: usize,
+    /// Install writes allowed per client per window. Generous: a harness
+    /// records one install per workflow it takes, so a legitimate client is
+    /// nowhere near this, while inflating a count to the top of the library
+    /// becomes something that has to be sustained rather than done once.
+    pub install_rate_limit: u32,
+    pub install_rate_window_secs: u64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -38,6 +44,14 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(256 * 1024),
+            install_rate_limit: env::var("INSTALL_RATE_LIMIT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(60),
+            install_rate_window_secs: env::var("INSTALL_RATE_WINDOW_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(60),
         })
     }
 }

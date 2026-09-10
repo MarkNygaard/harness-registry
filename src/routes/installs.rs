@@ -11,7 +11,7 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use serde_json::{json, Value};
@@ -19,14 +19,23 @@ use serde_json::{json, Value};
 use crate::{
     error::{Error, Result},
     models::RecordInstall,
+    ratelimit::client_key,
     AppState,
 };
 
 pub async fn record(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(slug): Path<String>,
     Json(body): Json<RecordInstall>,
 ) -> Result<Json<Value>> {
+    // Rate limited because this is an unauthenticated write that now decides
+    // ranking. Checked before the lookups, so a caller being throttled cannot
+    // use the endpoint to probe which slugs exist.
+    if !state.install_limiter.check(&client_key(&headers, None)) {
+        return Err(Error::TooManyRequests);
+    }
+
     let workflow_id: Option<(uuid::Uuid,)> =
         sqlx::query_as("SELECT id FROM registry_workflows WHERE slug = $1")
             .bind(&slug)
@@ -82,8 +91,15 @@ pub async fn record(
 /// rate limit that already guards `record`.
 pub async fn forget(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((slug, installation_id)): Path<(String, uuid::Uuid)>,
 ) -> Result<StatusCode> {
+    // Same limit and same bucket as `record`: an unauthenticated delete keyed
+    // on a guessable-in-bulk id deserves no more headroom than the write.
+    if !state.install_limiter.check(&client_key(&headers, None)) {
+        return Err(Error::TooManyRequests);
+    }
+
     let workflow_id: Option<(uuid::Uuid,)> =
         sqlx::query_as("SELECT id FROM registry_workflows WHERE slug = $1")
             .bind(&slug)

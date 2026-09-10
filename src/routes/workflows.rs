@@ -23,6 +23,14 @@ use crate::{
 /// The install count is `count(*)` over the records rather than a stored
 /// number, and the latest version excludes withdrawn ones so a pulled release
 /// does not keep being advertised as current.
+///
+/// Only installs seen in the last 90 days count, which is the second half of
+/// making the number safe to rank by. The rate limit bounds how fast a count
+/// can be inflated; this bounds how long an inflated one survives, because a
+/// fabricated install has to keep calling to keep counting. It also makes the
+/// figure mean "installs still out there" rather than "installs ever made",
+/// which is the more useful number anyway -- the schema anticipated this by
+/// refreshing `last_seen_at` on every read of the library.
 const SUMMARY_SELECT: &str = r#"
 SELECT w.slug,
        w.title,
@@ -32,7 +40,9 @@ SELECT w.slug,
        p.github_login AS publisher,
        (SELECT max(v.version) FROM registry_versions v
           WHERE v.workflow_id = w.id AND v.withdrawn_at IS NULL) AS latest_version,
-       (SELECT count(*) FROM registry_installs i WHERE i.workflow_id = w.id) AS installs,
+       (SELECT count(*) FROM registry_installs i
+          WHERE i.workflow_id = w.id
+            AND i.last_seen_at > now() - interval '90 days') AS installs,
        w.updated_at
   FROM registry_workflows w
   JOIN registry_publishers p ON p.id = w.publisher_id

@@ -461,7 +461,7 @@ dependencies = [
 
 [[package]]
 name = "harness-registry"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "chrono",
