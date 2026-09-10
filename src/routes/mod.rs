@@ -4,7 +4,7 @@ pub mod installs;
 pub mod workflows;
 
 use axum::{
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Router,
 };
 
@@ -38,6 +38,13 @@ pub fn router() -> Router<AppState> {
         // harness that installed this workflow, identified only by the opaque
         // installation id it generated for itself.
         .route("/v1/workflows/{slug}/installs", put(installs::record))
+        // Uninstall. The id is in the path here rather than a body: a DELETE
+        // carrying one is poorly supported by intermediaries and by some HTTP
+        // clients, and there is nothing to send that the path cannot name.
+        .route(
+            "/v1/workflows/{slug}/installs/{installation_id}",
+            delete(installs::forget),
+        )
         // Admin. Disabled outright when ADMIN_TOKEN is unset.
         .route("/v1/admin/tokens", post(admin::issue_token))
         .route(
