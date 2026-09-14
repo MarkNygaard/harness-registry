@@ -289,10 +289,18 @@ pub async fn publish_version(
     .await
     .map_err(|e| on_unique_violation(e, "a concurrent publish took that version; retry"))?;
 
-    sqlx::query("UPDATE registry_workflows SET updated_at = now() WHERE id = $1")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+    // Publishing a version re-lists an entry its author had withdrawn. The
+    // alternative is a dead end: `unlisted_at` keeps the slug taken, so a
+    // create would collide with the withdrawn entry and a version would land in
+    // something invisible. Somebody who pulls a broken workflow, fixes it and
+    // publishes again means to put it back, and somebody who does not simply
+    // does not publish again.
+    sqlx::query(
+        "UPDATE registry_workflows SET updated_at = now(), unlisted_at = NULL WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
 
     tx.commit().await?;
 
