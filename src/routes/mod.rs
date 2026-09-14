@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod enroll;
 pub mod health;
 pub mod installs;
 pub mod me;
@@ -17,6 +18,12 @@ pub fn router() -> Router<AppState> {
         .route("/v1/me", get(me::get).patch(me::update))
         .route("/healthz", get(health::live))
         .route("/readyz", get(health::ready))
+        // Self-serve enrollment. Unauthenticated by necessity: the caller has
+        // no credential yet, which is the whole point. Both writes are rate
+        // limited inside the handler, and both disappear when no GitHub client
+        // id is configured.
+        .route("/v1/enroll", get(enroll::available).post(enroll::start))
+        .route("/v1/enroll/poll", post(enroll::poll))
         // Read side. Public: the registry is a library, and the static site
         // fetches this at build time.
         .route(

@@ -30,6 +30,13 @@ pub enum Error {
     #[error("payload too large")]
     TooLarge,
 
+    /// An upstream this service depends on failed, which is GitHub during
+    /// enrollment and nothing else. Separate from a 500 because the fault is
+    /// not here and a retry is reasonable, and the message never carries
+    /// GitHub's own text: an upstream body is not ours to relay.
+    #[error("{0}")]
+    BadGateway(String),
+
     /// Distinct from every other refusal on purpose: a client that is merely
     /// early can retry, and one that is wrong should not.
     #[error("too many requests")]
@@ -48,6 +55,7 @@ impl IntoResponse for Error {
             Error::NotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
             Error::Conflict(m) => (StatusCode::CONFLICT, m.clone()),
             Error::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE, self.to_string()),
+            Error::BadGateway(m) => (StatusCode::BAD_GATEWAY, m.clone()),
             Error::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
             // The message is logged, never returned: a Postgres error can
             // carry table and column names, and a constraint name is a map of

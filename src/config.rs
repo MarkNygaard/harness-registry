@@ -21,6 +21,24 @@ pub struct Config {
     /// becomes something that has to be sustained rather than done once.
     pub install_rate_limit: u32,
     pub install_rate_window_secs: u64,
+    /// OAuth app client id for self-serve enrollment. Unset disables the
+    /// enrollment endpoints entirely, the same way an unset `ADMIN_TOKEN`
+    /// disables the admin ones, so only an operator who has created the app
+    /// and enabled its device flow gets the routes. No client secret: GitHub's
+    /// device flow is specified for public clients and does not use one.
+    pub github_client_id: Option<String>,
+    /// Device flows a client may start per window. Deliberately small. One
+    /// person enrolling one harness needs a single flow, and the endpoint
+    /// hands out credentials.
+    pub enroll_rate_limit: u32,
+    pub enroll_rate_window_secs: u64,
+    /// How old a GitHub account must be before it may publish here. Zero turns
+    /// the check off, which is what a private registry among colleagues wants.
+    pub min_account_age_days: i64,
+    /// Listed workflows one publisher may hold. Generous, and liftable per
+    /// deployment: the point is to bound bulk publishing, not to ration
+    /// somebody with a lot of good workflows.
+    pub max_workflows_per_publisher: i64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -52,6 +70,23 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(60),
+            github_client_id: env::var("GITHUB_CLIENT_ID").ok().filter(|v| !v.is_empty()),
+            enroll_rate_limit: env::var("ENROLL_RATE_LIMIT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10),
+            enroll_rate_window_secs: env::var("ENROLL_RATE_WINDOW_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(3600),
+            min_account_age_days: env::var("MIN_ACCOUNT_AGE_DAYS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(30),
+            max_workflows_per_publisher: env::var("MAX_WORKFLOWS_PER_PUBLISHER")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(25),
         })
     }
 }

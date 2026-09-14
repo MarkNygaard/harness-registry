@@ -68,6 +68,9 @@ fetches them at build time.
 | `GET` | `/v1/workflows/{slug}` | — | one workflow |
 | `GET` | `/v1/workflows/{slug}/versions` | — | version history |
 | `GET` | `/v1/workflows/{slug}/versions/{n}` | — | the YAML document |
+| `GET` | `/v1/enroll` | — | whether self-serve enrollment is offered here |
+| `POST` | `/v1/enroll` | — | start a GitHub device flow |
+| `POST` | `/v1/enroll/poll` | — | finish it, and receive a publisher token |
 | `GET` | `/v1/me` | publisher | who this token is; also how a client checks one is live |
 | `PATCH` | `/v1/me` | publisher | set the display name entries are shown under |
 | `POST` | `/v1/workflows` | publisher | create, with version 1 |
@@ -81,6 +84,23 @@ fetches them at build time.
 | `PUT` | `/v1/admin/publishers/{github_id}/blocked` | admin | block or unblock |
 
 ### Decisions worth knowing
+
+**Enrollment is a device flow, and it is stateless.** A harness self-hosted on
+any hostname has to be able to obtain a publisher token, which rules out the
+authorization-code redirect: that needs a callback URL registered per client.
+The device flow has none, so nothing about a new install is registered anywhere.
+The `device_code` this service returns is GitHub's own and the harness sends it
+back on each poll, so a flow in progress needs no row and no in-memory state,
+and survives a rollout or a second replica. No scope is requested and no client
+secret is used: the public profile is all enrollment reads, and GitHub's device
+flow is specified for public clients.
+
+**`github_id` now means something.** `POST /v1/admin/tokens` takes the id in its
+body, so before enrollment existed the column was whatever an operator typed,
+and "published by @someone" was an assertion rather than proof. An enrolled
+publisher's id comes from GitHub in exchange for an authorization the person
+granted. The admin route stays for recovery and for testing, and is no longer
+how anybody normally gets a token.
 
 **Liveness and readiness are separate.** `/readyz` touches the database;
 `/healthz` does not. A liveness probe that checked Postgres would restart the
@@ -195,6 +215,11 @@ closed.
 | `MAX_YAML_BYTES` | `262144` | largest workflow document accepted |
 | `INSTALL_RATE_LIMIT` | `60` | install writes per client per window |
 | `INSTALL_RATE_WINDOW_SECS` | `60` | length of that window |
+| `GITHUB_CLIENT_ID` | *(none)* | OAuth app for enrollment; unset disables those endpoints |
+| `ENROLL_RATE_LIMIT` | `10` | device flows started per client per window |
+| `ENROLL_RATE_WINDOW_SECS` | `3600` | length of that window |
+| `MIN_ACCOUNT_AGE_DAYS` | `30` | how old a GitHub account must be to publish; `0` disables |
+| `MAX_WORKFLOWS_PER_PUBLISHER` | `25` | listed workflows one publisher may hold; `0` disables |
 | `RUST_LOG` | `info,harness_registry=debug` | |
 
 ## Development
