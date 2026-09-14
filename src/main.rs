@@ -26,6 +26,7 @@
 mod auth;
 mod config;
 mod error;
+mod github;
 mod models;
 mod ratelimit;
 mod routes;
@@ -50,6 +51,15 @@ pub struct AppState {
     /// Guards the unauthenticated install writes. Shared across handlers, so
     /// the window is per client rather than per request.
     pub install_limiter: std::sync::Arc<ratelimit::RateLimiter>,
+    /// Guards starting a device flow. Its own bucket, and a strict one: this
+    /// endpoint hands out publisher tokens.
+    pub enroll_limiter: std::sync::Arc<ratelimit::RateLimiter>,
+    /// Guards polling one. Separate and generous, because polling is how the
+    /// flow works rather than a sign of abuse.
+    pub enroll_poll_limiter: std::sync::Arc<ratelimit::RateLimiter>,
+    /// GitHub, for self-serve enrollment. `None` when no client id is
+    /// configured, which removes the enrollment routes.
+    pub github: Option<github::GitHub>,
 }
 
 #[tokio::main]
@@ -77,6 +87,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("ADMIN_TOKEN is unset; the admin endpoints are disabled");
     }
 
+    let github = github::GitHub::new(config.github_client_id.as_deref());
+    if github.is_none() {
+        tracing::warn!(
+            "GITHUB_CLIENT_ID is unset; self-serve enrollment is disabled and \
+             publisher tokens can only be minted by an admin"
+        );
+    }
+
+    // Polling is the normal path, so its window allows one flow's worth of
+    // calls many times over: a 15-minute code at a 5-second interval is around
+    // 180 polls. Derived from the start limit rather than configured
+    // separately, so the two cannot drift into a combination that throttles
+    // the flow it is meant to permit.
+    let poll_limit = config.enroll_rate_limit.saturating_mul(200);
+
     let state = AppState {
         pool,
         config: std::sync::Arc::new(config.clone()),
@@ -84,6 +109,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.install_rate_limit,
             Duration::from_secs(config.install_rate_window_secs),
         )),
+        enroll_limiter: std::sync::Arc::new(ratelimit::RateLimiter::new(
+            config.enroll_rate_limit,
+            Duration::from_secs(config.enroll_rate_window_secs),
+        )),
+        enroll_poll_limiter: std::sync::Arc::new(ratelimit::RateLimiter::new(
+            poll_limit,
+            Duration::from_secs(config.enroll_rate_window_secs),
+        )),
+        github,
     };
 
     let app = Router::new()

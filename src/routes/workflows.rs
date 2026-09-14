@@ -222,6 +222,7 @@ pub async fn create(
     Json(body): Json<CreateWorkflow>,
 ) -> Result<Json<Value>> {
     body.validate(state.config.max_yaml_bytes)?;
+    check_publisher_cap(&state, &publisher).await?;
 
     // Workflow and its first version in one transaction: a workflow with no
     // versions is not something the read side knows how to render.
@@ -351,6 +352,45 @@ pub async fn unlist(
 }
 
 // --- helpers ----------------------------------------------------------------
+
+/// Refuse a publisher who already holds the maximum number of listed
+/// workflows.
+///
+/// Only on `create`. A new *version* of something already published is not
+/// bulk publishing, and capping that would stop somebody maintaining the work
+/// they have. Unlisted entries do not count, so withdrawing one frees its
+/// place rather than permanently spending it.
+///
+/// This was written down when the library was designed and had nowhere to run
+/// until publishing became self-serve: with tokens minted by hand, the cap was
+/// whoever the operator decided to mint for.
+async fn check_publisher_cap(state: &AppState, publisher: &Publisher) -> Result<()> {
+    let cap = state.config.max_workflows_per_publisher;
+    if cap <= 0 {
+        return Ok(());
+    }
+
+    let (held,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM registry_workflows
+          WHERE publisher_id = $1 AND unlisted_at IS NULL",
+    )
+    .bind(publisher.id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    if held >= cap {
+        tracing::warn!(
+            publisher = %publisher.github_login,
+            held,
+            cap,
+            "publish refused: per-publisher cap reached"
+        );
+        return Err(Error::Forbidden(format!(
+            "this account already has {held} workflows in the library, which is the limit of {cap}"
+        )));
+    }
+    Ok(())
+}
 
 async fn workflow_id(state: &AppState, slug: &str) -> Result<Uuid> {
     sqlx::query_as::<_, (Uuid,)>("SELECT id FROM registry_workflows WHERE slug = $1")
