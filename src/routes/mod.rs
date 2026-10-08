@@ -24,6 +24,9 @@ pub fn router() -> Router<AppState> {
         // id is configured.
         .route("/v1/enroll", get(enroll::available).post(enroll::start))
         .route("/v1/enroll/poll", post(enroll::poll))
+        // Enrollment from a GitHub token the harness already holds, from the
+        // person's own sign-in. Always on: it needs no OAuth app here.
+        .route("/v1/enroll/github", post(enroll::with_github_token))
         // Read side. Public: the registry is a library, and the static site
         // fetches this at build time.
         .route(

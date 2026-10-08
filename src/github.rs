@@ -85,6 +85,70 @@ pub struct GitHubUser {
 pub struct GitHub {
     http: reqwest::Client,
     client_id: String,
+    profiles: Profiles,
+}
+
+/// Reads the account behind a GitHub access token, and nothing else.
+///
+/// Separate from [`GitHub`] because it needs no client id: `GET /user` answers
+/// for a token issued by *any* OAuth app. That is what lets a harness whose
+/// people already signed in with GitHub hand over their token instead of
+/// running a device flow, on a registry that never set up an OAuth app at all.
+#[derive(Clone)]
+pub struct Profiles {
+    http: reqwest::Client,
+}
+
+impl Default for Profiles {
+    fn default() -> Self {
+        let http = reqwest::Client::builder()
+            .timeout(TIMEOUT)
+            .user_agent(USER_AGENT)
+            .build()
+            .unwrap_or_default();
+        Self { http }
+    }
+}
+
+impl Profiles {
+    /// Read the account an access token belongs to.
+    ///
+    /// This is what makes the `github_id` on a publisher row mean something.
+    /// It comes from GitHub in exchange for a token the person authorized,
+    /// never from the body of a request.
+    pub async fn user(&self, access_token: &str) -> Result<GitHubUser> {
+        let resp = self
+            .http
+            .get(USER_URL)
+            .bearer_auth(access_token)
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(unreachable)?;
+
+        if !resp.status().is_success() {
+            return Err(profile_refused(resp.status()));
+        }
+
+        resp.json().await.map_err(|e| {
+            tracing::error!(error = %e, "unreadable profile response");
+            Error::BadGateway("GitHub sent an unreadable response".into())
+        })
+    }
+}
+
+/// What a refused profile read means to the caller.
+///
+/// A 401 is the token: revoked, expired, or never real. That is the caller's
+/// to fix by signing in again, and it must not read as GitHub being down,
+/// which is what a 502 says. Anything else is GitHub's fault.
+fn profile_refused(status: reqwest::StatusCode) -> Error {
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        tracing::info!("GitHub did not accept the access token");
+        return Error::Unauthorized;
+    }
+    tracing::error!(status = %status, "GitHub refused the profile read");
+    Error::BadGateway("GitHub would not confirm the account".into())
 }
 
 /// What GitHub answers a token request with. Success and failure share one
@@ -111,6 +175,7 @@ impl GitHub {
         Some(Self {
             http,
             client_id: client_id.to_owned(),
+            profiles: Profiles::default(),
         })
     }
 
@@ -161,32 +226,9 @@ impl GitHub {
         Ok(classify(body))
     }
 
-    /// Read the account an access token belongs to.
-    ///
-    /// This is what makes the `github_id` on a publisher row mean something.
-    /// It comes from GitHub in exchange for a token the person authorized,
-    /// never from the body of a request.
+    /// Read the account the device flow's access token belongs to.
     pub async fn user(&self, access_token: &str) -> Result<GitHubUser> {
-        let resp = self
-            .http
-            .get(USER_URL)
-            .bearer_auth(access_token)
-            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-            .send()
-            .await
-            .map_err(unreachable)?;
-
-        if !resp.status().is_success() {
-            tracing::error!(status = %resp.status(), "GitHub refused the profile read");
-            return Err(Error::BadGateway(
-                "GitHub would not confirm the account".into(),
-            ));
-        }
-
-        resp.json().await.map_err(|e| {
-            tracing::error!(error = %e, "unreadable profile response");
-            Error::BadGateway("GitHub sent an unreadable response".into())
-        })
+        self.profiles.user(access_token).await
     }
 }
 
@@ -277,5 +319,25 @@ mod tests {
             );
         }
         assert!(matches!(classify(response(None, None)), Poll::Expired));
+    }
+
+    #[test]
+    fn a_rejected_token_is_the_callers_to_fix_not_an_outage() {
+        // A harness holding a revoked token has to be told to sign in again.
+        // A 502 would send it retrying a token that will never work.
+        assert!(matches!(
+            profile_refused(reqwest::StatusCode::UNAUTHORIZED),
+            Error::Unauthorized
+        ));
+        for status in [
+            reqwest::StatusCode::FORBIDDEN,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            assert!(
+                matches!(profile_refused(status), Error::BadGateway(_)),
+                "{status}"
+            );
+        }
     }
 }

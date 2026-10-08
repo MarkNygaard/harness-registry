@@ -60,6 +60,9 @@ pub struct AppState {
     /// GitHub, for self-serve enrollment. `None` when no client id is
     /// configured, which removes the enrollment routes.
     pub github: Option<github::GitHub>,
+    /// GitHub profile reads, for enrollment from a token a harness already
+    /// holds. Needs no client id, so always present.
+    pub profiles: github::Profiles,
 }
 
 #[tokio::main]
@@ -118,6 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Duration::from_secs(config.enroll_rate_window_secs),
         )),
         github,
+        profiles: github::Profiles::default(),
     };
 
     let app = Router::new()
