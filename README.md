@@ -71,6 +71,7 @@ fetches them at build time.
 | `GET` | `/v1/enroll` | — | whether self-serve enrollment is offered here |
 | `POST` | `/v1/enroll` | — | start a GitHub device flow |
 | `POST` | `/v1/enroll/poll` | — | finish it, and receive a publisher token |
+| `POST` | `/v1/enroll/github` | — | a publisher token for the owner of a GitHub access token |
 | `GET` | `/v1/me` | publisher | who this token is; also how a client checks one is live |
 | `PATCH` | `/v1/me` | publisher | set the display name entries are shown under |
 | `POST` | `/v1/workflows` | publisher | create, with version 1 |
@@ -84,6 +85,15 @@ fetches them at build time.
 | `PUT` | `/v1/admin/publishers/{github_id}/blocked` | admin | block or unblock |
 
 ### Decisions worth knowing
+
+**A harness can enroll its people from their own GitHub sign-in.** Most
+people who publish are already signed in to their harness with GitHub, and the
+harness holds their GitHub access token from that. `POST /v1/enroll/github`
+takes it and asks GitHub's `/user` whose it is, so the publisher is whoever
+GitHub says, never whoever the harness claims. A token from *any* OAuth app
+answers `/user`, so this needs no `GITHUB_CLIENT_ID` and is always on. The
+token is used once and not stored. The account-age and blocked checks are the
+device flow's own.
 
 **Enrollment is a device flow, and it is stateless.** A harness self-hosted on
 any hostname has to be able to obtain a publisher token, which rules out the

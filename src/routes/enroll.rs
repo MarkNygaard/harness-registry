@@ -113,9 +113,72 @@ pub async fn poll(
     // The access token is used once, here, and never stored. Everything after
     // this point is about the registry's own publisher row.
     let user = github.user(&access_token).await?;
-    check_account_age(&state, &user)?;
+    enrolled(&state, &user, TOKEN_NAME).await
+}
 
-    let publisher_id = upsert_publisher(&state, &user).await?;
+#[derive(Debug, Deserialize)]
+pub struct GitHubTokenRequest {
+    /// A GitHub access token the person granted, to any OAuth app.
+    pub access_token: String,
+}
+
+/// `POST /v1/enroll/github` — a publisher token for whoever a GitHub access
+/// token belongs to.
+///
+/// For a harness whose people already signed in with GitHub. Instead of a
+/// device flow, it hands over the token it holds for the person pressing
+/// Publish, and this service asks GitHub whose it is. The harness never says
+/// who the person is; GitHub does, which is the same proof the device flow
+/// ends with.
+///
+/// Works whether or not this registry has an OAuth app of its own: `/user`
+/// answers for a token from any app. The account-age and blocked checks are
+/// the device flow's, unchanged.
+pub async fn with_github_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<GitHubTokenRequest>,
+) -> Result<Json<Value>> {
+    // The generous bucket, not the strict one. Every person on a harness
+    // reaches this from that harness's address, so a limit sized for one
+    // person starting device flows would turn away a team's first morning.
+    // Each call still needs a token GitHub accepts, which is not something a
+    // caller can mint in bulk.
+    if !state.enroll_poll_limiter.check(&client_key(&headers, None)) {
+        return Err(Error::TooManyRequests);
+    }
+    let access_token = plausible_token(&body.access_token)?;
+    let user = state.profiles.user(access_token).await?;
+    enrolled(&state, &user, TOKEN_NAME_GITHUB).await
+}
+
+/// What a token minted from a harness's GitHub sign-in is called.
+const TOKEN_NAME_GITHUB: &str = "harness GitHub sign-in";
+
+/// Reject what cannot be a GitHub token before spending a call on it.
+///
+/// GitHub's tokens are well under 300 characters. A body far longer than that
+/// is not a token, and passing it on would put arbitrary input into a request
+/// header.
+fn plausible_token(token: &str) -> Result<&str> {
+    let token = token.trim();
+    if token.is_empty()
+        || token.len() > 512
+        || token.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(Error::BadRequest(
+            "access_token is not a GitHub token".into(),
+        ));
+    }
+    Ok(token)
+}
+
+/// The end of every enrollment: check the account, create or reuse its
+/// publisher row, and issue a token for it.
+async fn enrolled(state: &AppState, user: &GitHubUser, token_name: &str) -> Result<Json<Value>> {
+    check_account_age(state, user)?;
+
+    let publisher_id = upsert_publisher(state, user).await?;
     let token = generate_token();
 
     sqlx::query(
@@ -124,13 +187,14 @@ pub async fn poll(
     )
     .bind(publisher_id)
     .bind(hash_token(&token))
-    .bind(TOKEN_NAME)
+    .bind(token_name)
     .execute(&state.pool)
     .await?;
 
     tracing::info!(
         publisher = %user.login,
         github_id = user.id,
+        via = token_name,
         "publisher enrolled"
     );
 
@@ -218,15 +282,19 @@ async fn upsert_publisher(state: &AppState, user: &GitHubUser) -> Result<Uuid> {
     Ok(id)
 }
 
-/// `GET /v1/enroll` — whether this registry offers self-serve enrollment.
+/// `GET /v1/enroll` — which ways of enrolling this registry offers.
 ///
-/// The harness asks before showing a Connect button, so that an install
-/// pointed at a private registry with no GitHub app configured shows the
-/// paste-a-token path instead of a button that can only fail.
+/// `enrollment` is the device flow, which needs this registry's own OAuth app.
+/// `github_token` is `POST /v1/enroll/github`, which needs nothing and is
+/// always on; the field exists so a harness can tell this registry from an
+/// older one that would answer that route with a 404.
 pub async fn available(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
     (
         StatusCode::OK,
-        Json(json!({ "enrollment": state.github.is_some() })),
+        Json(json!({
+            "enrollment": state.github.is_some(),
+            "github_token": true,
+        })),
     )
 }
 
@@ -260,6 +328,20 @@ mod tests {
         // being broken rather than as a rule.
         let now = at(30);
         assert!(old_enough(now - Duration::days(30), now, 30));
+    }
+
+    #[test]
+    fn only_something_shaped_like_a_token_is_sent_to_github() {
+        assert_eq!(plausible_token("  gho_abc123  ").unwrap(), "gho_abc123");
+        for bad in [
+            "",
+            "   ",
+            "gho_abc def",
+            "gho_abc\nX-Injected: 1",
+            &"a".repeat(513),
+        ] {
+            assert!(plausible_token(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
